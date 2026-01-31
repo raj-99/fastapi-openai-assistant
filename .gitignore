@@ -1,2 +1,17 @@
 # Python cache
 __pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# Pytest cache
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.vscode/
