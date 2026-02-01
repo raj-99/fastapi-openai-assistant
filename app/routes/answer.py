@@ -1,27 +1,27 @@
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from app.schemas import AnswerRequest, AnswerResponse
 
 logger = logging.getLogger("answer")
 router = APIRouter()
 
 @router.post("/answer", response_model=AnswerResponse)
-def answer(request: AnswerRequest) -> AnswerResponse:
-    request_id = uuid.uuid4()
-    logger.info(f"request_id={request_id} | received question={request.question!r}")
+def answer(answerRequest: AnswerRequest, request: Request) -> AnswerResponse:
+    request_id = getattr(request.state, "request_id", "no-request-id")
+    logger.info(f"request_id={request_id} | received question={answerRequest.question!r}")
     
     try:
         # Placeholder for actual answer generation logic
-        mocked_answer = f"(mock) You asked: {request.question}"
+        mocked_answer = f"(mock) You asked: {answerRequest.question}"
         mocked_sources = []    
-        if request.context:
+        if answerRequest.context:
             mocked_sources = ["provided_context"]
             
         response = AnswerResponse(
             answer=mocked_answer,
             sources=mocked_sources,
-            confidence=0.55 if request.context else 0.30,
+            confidence=0.55 if answerRequest.context else 0.30,
             follow_ups=["What is the desired outcome?", "Do you have any constraints(time, tools, budget)?"],
         )
         
