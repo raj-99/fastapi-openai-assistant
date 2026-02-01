@@ -9,7 +9,7 @@ logger = logging.getLogger("main")
 
 app = FastAPI(title=settings.app_name)
 
-@app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "ok"}
 
