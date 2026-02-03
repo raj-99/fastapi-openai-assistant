@@ -1,9 +1,17 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
 from app.schemas import AnswerRequest, AnswerResponse
+from app.core.openai_client import get_client
+from app.core.config import settings
 
 logger = logging.getLogger("answer")
 router = APIRouter()
+
+SYSTEM_PROMPT = """You are a helpful AI assistant.
+Return JSON ONLY that matches the schema: AnswerResponse with keys:
+answer (string), sources (array of strings), confidence (0..1), follow_ups (array of strings).
+If you are unsure, keep confidence low and ask follow-up questions.
+"""
 
 @router.post("/answer", response_model=AnswerResponse)
 def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
@@ -12,20 +20,43 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
     
     try:
         # Placeholder for actual answer generation logic
-        mocked_answer = f"(mock) You asked: {answer_request.question}"
-        mocked_sources = []    
+        client = get_client()
+        
+        #Build user message with optional context.
+        user_text = f"Question: {answer_request.question}"
         if answer_request.context:
-            mocked_sources = ["provided_context"]
+            user_text += f"\n\nContext:\n{answer_request.context}"
             
-        response = AnswerResponse(
-            answer=mocked_answer,
-            sources=mocked_sources,
-            confidence=0.55 if answer_request.context else 0.30,
-            follow_ups=["What is the desired outcome?", "Do you have any constraints(time, tools, budget)?"],
+        response = client.responses.create(
+            model=settings.openai_model,
+            input = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text}
+            ],
         )
         
-        logger.info(f"request_id={request_id} | SUCCESS | generated answer with confidence={response.confidence}")
-        return response
+        # The Responses API may return text in various output formats.
+        # We'll extract combined text and parse as JSON.
+        
+        text = ""
+        for item in response.output:
+            if item.type == "message":
+                for chunk in item.content:
+                    if chunk.type == "output_text":
+                        text += chunk.text
+        
+         # Parse JSON -> AnswerResponse
+        # Treat model output as untrusted until validated.
+        import json
+        data = json.loads(text)
+        validated = AnswerResponse(**data)
+        
+        logger.info(f"request_id={request_id} | SUCCESS")
+        return validated
+
+    except RuntimeError as e:
+        logger.error(f"request_id={request_id} | CONFIG ERROR : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     
     except Exception as e:
         logger.exception(f"request_id={request_id} | ERROR | failed to generate answer: {e}")
