@@ -1,7 +1,11 @@
 import logging
+import json
+import time
+import random
 from fastapi import APIRouter, HTTPException, Request
+from openai import APIConnectionError, AuthenticationError, RateLimitError
 from app.schemas import AnswerRequest, AnswerResponse
-from app.core.openai_client import get_client
+from app.core.openai_client import get_openai_client
 from app.core.config import settings
 
 logger = logging.getLogger("answer")
@@ -20,7 +24,7 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
     
     try:
         # Placeholder for actual answer generation logic
-        client = get_client()
+        client = get_openai_client()
         
         #Build user message with optional context.
         user_text = f"Question: {answer_request.question}"
@@ -29,30 +33,36 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
             
         response = client.responses.create(
             model=settings.openai_model,
-            input = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text}
-            ],
+            instructions=SYSTEM_PROMPT,
+            input=user_text,
         )
         
-        # The Responses API may return text in various output formats.
-        # We'll extract combined text and parse as JSON.
+        # SDK helper: returns the combined text output (best practice)
+        raw = (response.output_text or "").strip()
         
-        text = ""
-        for item in response.output:
-            if item.type == "message":
-                for chunk in item.content:
-                    if chunk.type == "output_text":
-                        text += chunk.text
-        
-         # Parse JSON -> AnswerResponse
+        # Parse JSON -> AnswerResponse
         # Treat model output as untrusted until validated.
-        import json
-        data = json.loads(text)
+        data = json.loads(raw)
         validated = AnswerResponse(**data)
         
         logger.info(f"request_id={request_id} | SUCCESS")
         return validated
+    
+    except AuthenticationError:
+        logger.error(f"request_id={request_id} | invalid OpenAI API key")
+        raise HTTPException(status_code=401, detail="Invalid OpenAI API key")
+
+    except RateLimitError:
+        logger.warning(f"request_id={request_id} | rate limited")
+        raise HTTPException(status_code=429, detail="Rate limited by OpenAI")
+
+    except APIConnectionError:
+        logger.warning(f"request_id={request_id} | OpenAI connection error")
+        raise HTTPException(status_code=502, detail="OpenAI connection error")
+    
+    except json.JSONDecodeError:
+        logger.warning(f"request_id={request_id} | model returned non-JSON output")
+        raise HTTPException(status_code=502, detail="Model returned invalid JSON")
 
     except RuntimeError as e:
         logger.error(f"request_id={request_id} | CONFIG ERROR : {e}")
