@@ -17,6 +17,38 @@ answer (string), sources (array of strings), confidence (0..1), follow_ups (arra
 If you are unsure, keep confidence low and ask follow-up questions.
 """
 
+def _call_openai_with_retries(client, *, model: str, instructions: str, user_text:str, request_id: str):
+    max_retries = 3 # total attempts = initial try + 2 retries
+    base_delay = 0.6 # seconds
+    max_delay = 8.0 # seconds
+    
+    last_exc = None
+    
+    for attempt in range(max_retries):
+        try:
+            return client.responses.create(
+                model=model,
+                instructions=instructions,
+                input=user_text,
+            )
+        except(RateLimitError, APIConnectionError) as e:
+            last_exc = e
+            
+            # If this was the last attempt, raise and let handlers respond
+            if attempt == max_retries - 1:
+                raise
+            
+            # Exponential backoff with jitter
+            delay = min(max_delay, base_delay * (2 ** attempt)) + random.uniform(0, 0.25)
+            
+            logger.warning(
+                f"request_id={request_id} | transient error={type(e).__name__} | "
+                f"attempt={attempt + 1}/{max_retries} | sleeping={delay:.2f}s"
+            )
+            time.sleep(delay)
+        
+        raise last_exc # Should never reach here
+
 @router.post("/answer", response_model=AnswerResponse)
 def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
     request_id = getattr(request.state, "request_id", "no-request-id")
@@ -31,10 +63,12 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
         if answer_request.context:
             user_text += f"\n\nContext:\n{answer_request.context}"
             
-        response = client.responses.create(
+        response = _call_openai_with_retries(
+            client,
             model=settings.openai_model,
             instructions=SYSTEM_PROMPT,
-            input=user_text,
+            user_text=user_text,
+            request_id=request_id,
         )
         
         # SDK helper: returns the combined text output (best practice)
