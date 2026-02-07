@@ -59,3 +59,50 @@ def test_answer_returns_expected_answer(monkeypatch):
     res = client.post("/api/answer", json={"question": "test"})
     assert res.status_code == 200
     assert res.json()["answer"] == "ok"
+
+
+def test_answer_json_repair_success(monkeypatch):
+    """
+    Simulate model returning invalid JSON first, then valid JSON on repair.
+    Ensures endpoint returns 200 and uses repaired JSON.
+    """
+
+    class FakeResp:
+        def __init__(self, output_text: str):
+            self.output_text = output_text
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+
+            # 1st call: invalid JSON (triggers JSONDecodeError)
+            if self.calls == 1:
+                return FakeResp('{"answer": "oops", "confidence": 0.5')  # missing braces, invalid JSON
+
+            # 2nd call: valid JSON (repair output)
+            return FakeResp('{"answer":"fixed","sources":[],"confidence":0.4,"follow_ups":[]}')
+
+    class FakeClient:
+        def __init__(self):
+            self.responses = FakeResponses()
+
+    # return the same FakeClient instance so the call counter increments
+    fake_client = FakeClient()
+
+    def fake_get_openai_client():
+        return fake_client
+
+    # Patch the get_openai_client that your route module uses
+    monkeypatch.setattr("app.routes.answer.get_openai_client", fake_get_openai_client)
+
+    res = client.post("/api/answer", json={"question": "test repair"})
+    assert res.status_code == 200
+
+    data = res.json()
+    assert data["answer"] == "fixed"
+    assert data["sources"] == []
+    assert 0.0 <= data["confidence"] <= 1.0
+    assert data["follow_ups"] == []

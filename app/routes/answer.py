@@ -11,6 +11,20 @@ from app.core.config import settings
 logger = logging.getLogger("answer")
 router = APIRouter()
 
+JSON_REPAIR_INSTRUCTIONS = """You will be given text that should represent JSON for this schema:
+
+AnswerResponse = {
+  "answer": string,
+  "sources": string[],
+  "confidence": number (0..1),
+  "follow_ups": string[]
+}
+
+Return ONLY valid JSON for AnswerResponse. No markdown. No extra text. No explanation.
+If fields are missing, infer reasonable defaults:
+sources=[], follow_ups=[], confidence=0.3
+"""
+
 SYSTEM_PROMPT = """You are a helpful AI assistant.
 Return JSON ONLY that matches the schema: AnswerResponse with keys:
 answer (string), sources (array of strings), confidence (0..1), follow_ups (array of strings).
@@ -47,10 +61,15 @@ def _call_openai_with_retries(client, *, model: str, instructions: str, user_tex
             )
             time.sleep(delay)
         
-        raise last_exc # Should never reach here
+    raise last_exc # Should never reach here
+
+def _parse_and_validate_answer(raw: str) -> AnswerResponse:
+    data = json.loads(raw)
+    return AnswerResponse(**data)
 
 @router.post("/answer", response_model=AnswerResponse)
 def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
+    start = time.time()
     request_id = getattr(request.state, "request_id", "no-request-id")
     logger.info(f"request_id={request_id} | received question={answer_request.question!r}")
     
@@ -71,7 +90,7 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
             request_id=request_id,
         )
         
-        # SDK helper: returns the combined text output (best practice)
+        # SDK helper: returns the combined text output
         raw = (response.output_text or "").strip()
         
         # Parse JSON -> AnswerResponse
@@ -79,8 +98,30 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
         data = json.loads(raw)
         validated = AnswerResponse(**data)
         
-        logger.info(f"request_id={request_id} | SUCCESS")
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.info(f"request_id={request_id} | SUCCESS | elapsed_ms={elapsed_ms}")
         return validated
+    
+    except json.JSONDecodeError:
+        logger.warning(f"request_id={request_id} | model returned invalid JSON, attempting repair")
+        
+        try:
+            repair_response = _call_openai_with_retries(
+                client,
+                model=settings.openai_model,
+                instructions=JSON_REPAIR_INSTRUCTIONS,
+                user_text=raw,
+                request_id=request_id,
+            )
+            fixed = (repair_response.output_text or "").strip()
+            validated = _parse_and_validate_answer(fixed)
+            
+            elapsed_ms = int((time.time() - start) * 1000)
+            logger.info(f"request_id={request_id} | SUCCESS_AFTER_REPAIR | elapsed_ms={elapsed_ms}")
+            return validated
+        except Exception:
+            logger.warning(f"request_id={request_id} | JSON repair failed!")
+            raise HTTPException(status_code=502, detail="Model returned invalid JSON and repair failed")
     
     except AuthenticationError:
         logger.error(f"request_id={request_id} | invalid OpenAI API key")
@@ -93,10 +134,6 @@ def answer(answer_request: AnswerRequest, request: Request) -> AnswerResponse:
     except APIConnectionError:
         logger.warning(f"request_id={request_id} | OpenAI connection error")
         raise HTTPException(status_code=502, detail="OpenAI connection error")
-    
-    except json.JSONDecodeError:
-        logger.warning(f"request_id={request_id} | model returned non-JSON output")
-        raise HTTPException(status_code=502, detail="Model returned invalid JSON")
 
     except RuntimeError as e:
         logger.error(f"request_id={request_id} | CONFIG ERROR : {e}")
