@@ -1,4 +1,4 @@
-def chunk_test(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str]:
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str]:
     text = text.strip()
     if not text:
         return []

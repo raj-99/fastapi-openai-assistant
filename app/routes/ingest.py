@@ -4,6 +4,8 @@ from app.schemas import IngestTextRequest, IngestTextResponse
 from app.core.db import get_db_connection
 from app.rag.embeddings import embed_texts
 from app.rag.chunking import chunk_text
+from psycopg.types.json import Jsonb
+from pgvector import Vector
 
 router = APIRouter()
 
@@ -22,10 +24,13 @@ def ingest_text(request: IngestTextRequest) -> IngestTextResponse:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+                query = """
+                INSERT INTO documents (id, source, chunk_index, content, metadata, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """
+                meta = Jsonb(request.metadata) if request.metadata else None
                 cur.execute(
-                    """
-                    INSERT INTO documents (id, source, chunk_index, chunk_text, metadata, embedding)
-                    """,
-                    (f"{doc_id}:{i}", request.source, i, chunk, request.metadata, vector)
+                    query,
+                    (f"{doc_id}:{i}", request.source, i, chunk, meta, Vector(vector)),
                 )
     return IngestTextResponse(document_id=doc_id, chunks_created=len(chunks))
