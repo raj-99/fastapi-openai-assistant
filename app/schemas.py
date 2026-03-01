@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Any
 
 class AnswerRequest(BaseModel):
     """
@@ -17,3 +18,12 @@ class AnswerResponse(BaseModel):
     sources: list[str] = []
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score between 0 and 1")
     follow_ups: list[str] = []
+
+class IngestTextRequest(BaseModel):
+    source: str = Field(...,min_length=1)
+    text: str = Field(...,min_length=10)
+    metadata: dict[str, Any] | None = None
+
+class IngestTextResponse(BaseModel):
+    document_id: str
+    chunks_created: int 
