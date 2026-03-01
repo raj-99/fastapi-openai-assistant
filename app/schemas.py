@@ -27,3 +27,9 @@ class IngestTextRequest(BaseModel):
 class IngestTextResponse(BaseModel):
     document_id: str
     chunks_created: int 
+
+class AskRequest(BaseModel):
+    question: str = Field(...,min_length=3)
+    top_k: int = Field(5, ge=1, le=10)
+    min_score: float = Field(0.2, ge=0.0, le=1.0)
+

@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.routes.answer import router as answer_router
 from app.routes.ingest import router as ingest_router
+from app.routes.ask import router as ask_router
 # from app.core.db import init_db
 
 setup_logging()
@@ -32,5 +33,6 @@ def health():
 
 app.include_router(answer_router, prefix="/api")
 app.include_router(ingest_router, prefix="/api")
+app.include_router(ask_router, prefix="/api")
 
 logger.info(f"Started application: {settings.app_name} || environment = {settings.environment} ")
