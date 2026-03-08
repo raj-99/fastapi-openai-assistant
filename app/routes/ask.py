@@ -127,7 +127,7 @@ def ask(ask_request: AskRequest, request: Request) -> AnswerResponse:
         try:
             data = _parse_answer_json(fixed_raw)
         except Exception as e:
-            logger.error(f"request_id={request_id} | JSON repair failed | raw_response={raw!r}")
+            logger.exception(f"request_id={request_id} | JSON repair failed | raw_response={raw!r}")
             raise HTTPException(status_code=502, detail="Model returned invalid JSON")
 
     data["sources"] = retrieved_ids
